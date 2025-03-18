@@ -1,35 +1,31 @@
 
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
 import { Provider } from 'react-redux';
-import { store } from '@/store/store';
-import Index from "./pages/Index";
-import Edit from "./pages/Edit";
-import Upload from "./pages/Upload";
-import NotFound from "./pages/NotFound";
+import { store } from './store/store';
 
-const queryClient = new QueryClient();
+import Index from './screens/Index';
+import Edit from './screens/Edit';
+import Upload from './screens/Upload';
 
-const App = () => (
-  <Provider store={store}>
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/edit" element={<Edit />} />
-            <Route path="/upload" element={<Upload />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </QueryClientProvider>
-  </Provider>
-);
+const Stack = createStackNavigator();
+
+const App = () => {
+  return (
+    <Provider store={store}>
+      <SafeAreaProvider>
+        <NavigationContainer>
+          <Stack.Navigator initialRouteName="Index" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Index" component={Index} />
+            <Stack.Screen name="Edit" component={Edit} />
+            <Stack.Screen name="Upload" component={Upload} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </Provider>
+  );
+};
 
 export default App;

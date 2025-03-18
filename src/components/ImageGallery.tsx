@@ -1,56 +1,79 @@
 
 import React, { useEffect, useState } from 'react';
-import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
-import { setGalleryImages, selectImage } from '@/store/imagesSlice';
-import { cn } from '@/lib/utils';
-import { ImageInfo } from '@/store/imagesSlice';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
+import { setGalleryImages, selectImage } from '../store/imagesSlice';
+import { ImageInfo } from '../store/imagesSlice';
 import ImageCard from './ImageCard';
-import { Button } from '@/components/ui/button';
-import { Upload, Check, ChevronRight } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { useNavigate } from 'react-router-dom';
+import Icon from 'react-native-vector-icons/Feather';
+import { CameraRoll } from "@react-native-camera-roll/camera-roll";
+import { PermissionsAndroid, Platform } from 'react-native';
 
 interface ImageGalleryProps {
-  className?: string;
+  navigation: any;
 }
 
-const ImageGallery: React.FC<ImageGalleryProps> = ({ className }) => {
-  const { toast } = useToast();
+const ImageGallery: React.FC<ImageGalleryProps> = ({ navigation }) => {
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
   const { galleryImages, selectedImages, multiSelectMode } = useAppSelector(state => state.images);
   const [loadingImages, setLoadingImages] = useState(true);
 
-  // Simulate loading images from device
+  const requestPhotoPermission = async () => {
+    if (Platform.OS !== 'android') return true;
+    
+    const permission = PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+    
+    try {
+      const granted = await PermissionsAndroid.request(permission);
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn(err);
+      return false;
+    }
+  };
+
+  // Load images from device
   useEffect(() => {
     const loadImages = async () => {
       try {
-        // In a real app, we would use a native API to access device photos
-        // For demo purposes, we're creating fake image data
-        const mockImages: ImageInfo[] = Array.from({ length: 20 }, (_, i) => ({
-          id: `img-${i}`,
-          url: `https://source.unsplash.com/random/400x400?sig=${i}`,
-          name: `Image ${i + 1}`,
-          selected: false
-        }));
+        const hasPermission = await requestPhotoPermission();
         
-        // Simulate loading delay
-        setTimeout(() => {
+        if (hasPermission) {
+          const result = await CameraRoll.getPhotos({
+            first: 20,
+            assetType: 'Photos',
+          });
+          
+          const deviceImages: ImageInfo[] = result.edges.map((edge, index) => ({
+            id: `img-${index}`,
+            url: edge.node.image.uri,
+            name: `Image ${index + 1}`,
+            selected: false
+          }));
+          
+          dispatch(setGalleryImages(deviceImages));
+        } else {
+          console.log('Permission denied');
+          // For demo purposes, fall back to mock data if permission is denied
+          const mockImages: ImageInfo[] = Array.from({ length: 20 }, (_, i) => ({
+            id: `img-${i}`,
+            url: `https://source.unsplash.com/random/400x400?sig=${i}`,
+            name: `Image ${i + 1}`,
+            selected: false
+          }));
+          
           dispatch(setGalleryImages(mockImages));
-          setLoadingImages(false);
-        }, 1500);
+        }
+        
+        setLoadingImages(false);
       } catch (error) {
-        toast({
-          title: "Error",
-          description: "Failed to load images from device",
-          variant: "destructive"
-        });
+        console.error('Error loading images:', error);
         setLoadingImages(false);
       }
     };
     
     loadImages();
-  }, [dispatch, toast]);
+  }, [dispatch]);
 
   const handleImageSelect = (id: string) => {
     dispatch(selectImage(id));
@@ -58,57 +81,134 @@ const ImageGallery: React.FC<ImageGalleryProps> = ({ className }) => {
 
   const handleNextStep = () => {
     if (selectedImages.length === 0) {
-      toast({
-        title: "No images selected",
-        description: "Please select at least one image to continue",
-        variant: "destructive"
-      });
+      // Handle case when no images selected
+      console.log('No images selected');
       return;
     }
-    navigate('/edit');
+    navigation.navigate('Edit');
   };
 
+  const renderItem = ({ item }: { item: ImageInfo }) => (
+    <ImageCard
+      image={item}
+      selected={selectedImages.includes(item.id)}
+      onSelect={() => handleImageSelect(item.id)}
+      selectionMode={multiSelectMode ? 'multiple' : 'single'}
+    />
+  );
+
   return (
-    <div className={cn("w-full flex flex-col gap-4", className)}>
+    <View style={styles.container}>
       {loadingImages ? (
-        <div className="flex flex-col items-center justify-center min-h-[300px]">
-          <div className="w-16 h-16 border-4 border-app-blue border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-lg text-gray-600">Loading your photos...</p>
-        </div>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#3b82f6" />
+          <Text style={styles.loadingText}>Loading your photos...</Text>
+        </View>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {galleryImages.map((image) => (
-              <ImageCard
-                key={image.id}
-                image={image}
-                selected={selectedImages.includes(image.id)}
-                onSelect={() => handleImageSelect(image.id)}
-                selectionMode={multiSelectMode ? 'multiple' : 'single'}
-              />
-            ))}
-          </div>
+          <FlatList
+            data={galleryImages}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.columnWrapper}
+            contentContainerStyle={styles.listContent}
+          />
           
           {selectedImages.length > 0 && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white p-4 shadow-lg z-10 flex justify-between items-center">
-              <div className="flex items-center">
-                <div className="h-10 w-10 rounded-full bg-app-blue flex items-center justify-center text-white">
-                  <Check size={20} />
-                </div>
-                <span className="ml-3 font-medium">
+            <View style={styles.selectionFooter}>
+              <View style={styles.selectionInfo}>
+                <View style={styles.checkCircle}>
+                  <Icon name="check" size={20} color="white" />
+                </View>
+                <Text style={styles.selectionText}>
                   {selectedImages.length} {selectedImages.length === 1 ? 'image' : 'images'} selected
-                </span>
-              </div>
+                </Text>
+              </View>
               
-              <Button onClick={handleNextStep} className="bg-app-blue hover:bg-app-dark-blue">
-                Next <ChevronRight className="ml-2" size={16} />
-              </Button>
-            </div>
+              <TouchableOpacity 
+                style={styles.nextButton} 
+                onPress={handleNextStep}
+              >
+                <Text style={styles.nextButtonText}>Next</Text>
+                <Icon name="chevron-right" size={16} color="white" style={styles.nextIcon} />
+              </TouchableOpacity>
+            </View>
           )}
         </>
       )}
-    </div>
+    </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 300,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: '#4b5563',
+  },
+  columnWrapper: {
+    justifyContent: 'space-between',
+  },
+  listContent: {
+    paddingBottom: 80, // Extra padding for footer
+  },
+  selectionFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'white',
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  selectionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  checkCircle: {
+    height: 40,
+    width: 40,
+    borderRadius: 20,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionText: {
+    marginLeft: 12,
+    fontWeight: '500',
+  },
+  nextButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  nextButtonText: {
+    color: 'white',
+    fontWeight: '500',
+  },
+  nextIcon: {
+    marginLeft: 8,
+  }
+});
 
 export default ImageGallery;

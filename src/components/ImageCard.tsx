@@ -1,60 +1,115 @@
 
 import React from 'react';
-import { cn } from '@/lib/utils';
-import { ImageInfo } from '@/store/imagesSlice';
-import { Check } from 'lucide-react';
+import { TouchableOpacity, Image, View, StyleSheet, Dimensions } from 'react-native';
+import { ImageInfo } from '../store/imagesSlice';
+import Icon from 'react-native-vector-icons/Feather';
 
 interface ImageCardProps {
   image: ImageInfo;
   selected: boolean;
   onSelect: () => void;
   selectionMode: 'single' | 'multiple';
-  className?: string;
 }
+
+const { width } = Dimensions.get('window');
+const cardSize = (width - 48) / 2; // 2 columns with 16px padding and 16px gap
 
 const ImageCard: React.FC<ImageCardProps> = ({ 
   image, 
   selected, 
   onSelect, 
-  selectionMode,
-  className 
+  selectionMode
 }) => {
   return (
-    <div 
-      className={cn(
-        "relative overflow-hidden rounded-lg aspect-square cursor-pointer group transition-all duration-200",
-        selected ? "ring-2 ring-app-blue" : "hover:opacity-90",
-        className
-      )}
-      onClick={onSelect}
+    <TouchableOpacity 
+      style={[
+        styles.container,
+        selected ? styles.selected : null
+      ]}
+      onPress={onSelect}
     >
-      <img 
-        src={image.url} 
-        alt={image.name} 
-        className="w-full h-full object-cover"
+      <Image 
+        source={{ uri: image.url }} 
+        style={styles.image}
+        resizeMode="cover"
       />
       
       {selected && (
-        <div className="absolute top-2 right-2 h-6 w-6 bg-app-blue rounded-full flex items-center justify-center">
-          <Check className="text-white" size={16} />
-        </div>
+        <View style={styles.checkmark}>
+          <Icon name="check" size={16} color="white" />
+        </View>
       )}
       
-      <div className={cn(
-        "absolute inset-0 bg-black/0 transition-all duration-200",
-        selected && "bg-black/10"
-      )} />
+      <View style={[
+        styles.overlay,
+        selected && styles.overlaySelected
+      ]} />
       
       {image.uploadProgress !== undefined && image.uploadProgress < 100 && (
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200">
-          <div 
-            className="h-full bg-app-blue transition-all duration-300"
-            style={{ width: `${image.uploadProgress}%` }}
+        <View style={styles.progressContainer}>
+          <View 
+            style={[
+              styles.progressBar,
+              { width: `${image.uploadProgress}%` }
+            ]}
           />
-        </div>
+        </View>
       )}
-    </div>
+    </TouchableOpacity>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    position: 'relative',
+    width: cardSize,
+    height: cardSize,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  selected: {
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+  },
+  image: {
+    width: '100%',
+    height: '100%',
+  },
+  checkmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    height: 24,
+    width: 24,
+    borderRadius: 12,
+    backgroundColor: '#3b82f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0)',
+  },
+  overlaySelected: {
+    backgroundColor: 'rgba(0,0,0,0.1)',
+  },
+  progressContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: '#e5e7eb',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#3b82f6',
+  }
+});
 
 export default ImageCard;

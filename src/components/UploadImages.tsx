@@ -1,232 +1,290 @@
 
 import React, { useState } from 'react';
-import { useAppDispatch, useAppSelector } from '@/hooks/useRedux';
-import { updateUploadProgress, setUploadStatus } from '@/store/imagesSlice';
-import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
-import { storage, db } from '@/lib/firebase';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc } from 'firebase/firestore';
-import { useToast } from '@/hooks/use-toast';
-import { Upload, Check, X, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useAppSelector, useAppDispatch } from '../hooks/useRedux';
+import { updateUploadProgress, setUploadStatus } from '../store/imagesSlice';
+import Icon from 'react-native-vector-icons/Feather';
+import firebase from '../lib/firebase';
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { getFirestore, collection, addDoc } from 'firebase/firestore';
 
-const UploadImages: React.FC = () => {
-  const { toast } = useToast();
-  const navigate = useNavigate();
-  const dispatch = useAppDispatch();
+interface UploadImagesProps {
+  navigation: any;
+}
+
+const UploadImages: React.FC<UploadImagesProps> = ({ navigation }) => {
   const { galleryImages, selectedImages, currentFilter } = useAppSelector(state => state.images);
-  
+  const dispatch = useAppDispatch();
   const [uploading, setUploading] = useState(false);
   const [uploadComplete, setUploadComplete] = useState(false);
-  const [overallProgress, setOverallProgress] = useState(0);
 
-  // Get selected image objects
   const selectedImageObjects = galleryImages.filter(img => selectedImages.includes(img.id));
 
   const uploadToFirebase = async () => {
-    if (selectedImages.length === 0) {
-      toast({
-        title: "No images selected",
-        description: "Please select at least one image to upload",
-        variant: "destructive",
-      });
-      return;
-    }
-
+    if (selectedImageObjects.length === 0) return;
+    
     setUploading(true);
-    let completedUploads = 0;
-    let failedUploads = 0;
-
-    // We'd fetch the actual file in a real app
-    // For this demo, we'll simulate it with a fetch
-    for (const imageId of selectedImages) {
-      const imageObj = galleryImages.find(img => img.id === imageId);
+    
+    try {
+      const storage = getStorage(firebase);
+      const db = getFirestore(firebase);
       
-      if (!imageObj) continue;
-      
-      try {
-        // Simulate getting the image file from URL
-        dispatch(updateUploadProgress({ id: imageId, progress: 10 }));
-        
-        // In a real app, we'd use the actual file from the device
-        const response = await fetch(imageObj.url);
-        const blob = await response.blob();
-        
-        // Create a storage reference
-        const storageRef = ref(storage, `images/${Date.now()}_${imageObj.name}`);
-        
-        // Upload the file with progress tracking
-        const uploadTask = uploadBytesResumable(storageRef, blob);
-        
-        uploadTask.on('state_changed', 
-          (snapshot) => {
-            // Track upload progress
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            dispatch(updateUploadProgress({ id: imageId, progress }));
-            
-            // Update overall progress
-            completedUploads = selectedImages.length > 1 
-              ? (failedUploads + completedUploads + progress / 100) / selectedImages.length * 100
-              : progress;
-            setOverallProgress(completedUploads);
-          },
-          (error) => {
-            // Handle errors
-            console.error("Upload error:", error);
-            dispatch(setUploadStatus({ 
-              id: imageId, 
-              status: 'error', 
-              error: 'Failed to upload' 
-            }));
-            failedUploads++;
-            toast({
-              title: "Upload failed",
-              description: `Failed to upload ${imageObj.name}`,
-              variant: "destructive",
-            });
-          },
-          async () => {
-            // Upload completed successfully
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            
-            // Store image metadata in Firestore
-            await addDoc(collection(db, 'images'), {
-              name: imageObj.name,
-              description: imageObj.description || '',
-              filter: currentFilter,
-              downloadURL,
-              uploadedAt: new Date(),
-            });
-            
-            dispatch(setUploadStatus({ id: imageId, status: 'success' }));
-            completedUploads++;
-            
-            // If all uploads are completed
-            if (completedUploads + failedUploads === selectedImages.length) {
-              setUploading(false);
-              setUploadComplete(true);
-              setOverallProgress(100);
+      for (const image of selectedImageObjects) {
+        try {
+          // Convert image URI to blob
+          const response = await fetch(image.url);
+          const blob = await response.blob();
+          
+          // Create a storage reference
+          const storageRef = ref(storage, `images/${Date.now()}_${image.name}`);
+          
+          // Upload the file
+          const uploadTask = uploadBytesResumable(storageRef, blob);
+          
+          // Listen for upload state changes
+          uploadTask.on('state_changed', 
+            (snapshot) => {
+              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              dispatch(updateUploadProgress({ id: image.id, progress }));
+            }, 
+            (error) => {
+              console.error('Upload error:', error);
+              dispatch(setUploadStatus({ id: image.id, status: 'error', error: error.message }));
+            }, 
+            async () => {
+              // Upload completed successfully
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
               
-              toast({
-                title: "Upload complete",
-                description: "All images have been successfully uploaded",
+              // Add a document to Firestore
+              await addDoc(collection(db, 'images'), {
+                url: downloadURL,
+                name: image.name,
+                description: image.description || '',
+                filter: currentFilter,
+                createdAt: new Date().toISOString()
               });
+              
+              dispatch(setUploadStatus({ id: image.id, status: 'success' }));
             }
-          }
-        );
-      } catch (error) {
-        console.error("Error preparing upload:", error);
-        dispatch(setUploadStatus({ 
-          id: imageId, 
-          status: 'error', 
-          error: 'Failed to prepare upload' 
-        }));
-        failedUploads++;
-        
-        if (completedUploads + failedUploads === selectedImages.length) {
-          setUploading(false);
+          );
+        } catch (error) {
+          console.error('Error processing image:', error);
+          dispatch(setUploadStatus({ id: image.id, status: 'error', error: 'Failed to process image' }));
         }
       }
+      
+      // Set upload complete when all are done
+      setUploadComplete(true);
+      
+    } catch (error) {
+      console.error('Upload error:', error);
+    } finally {
+      setUploading(false);
     }
   };
 
-  const handleBackToGallery = () => {
-    navigate('/');
+  const navigateToGallery = () => {
+    navigation.navigate('Index');
   };
 
   return (
-    <div className="flex flex-col gap-6 p-4">
-      <div className="mb-8">
-        <h2 className="text-lg font-medium mb-6">Upload Images</h2>
+    <View style={styles.container}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>Upload Images</Text>
+        <Text style={styles.subtitle}>Review your selection before uploading</Text>
         
-        <div className="mb-6">
-          <p className="text-gray-600 mb-2">
-            {selectedImages.length} {selectedImages.length === 1 ? 'image' : 'images'} ready to upload
-          </p>
-          <Progress value={overallProgress} className="h-2" />
-          <p className="text-right text-sm text-gray-500 mt-1">
-            {Math.round(overallProgress)}%
-          </p>
-        </div>
-        
-        <div className="space-y-4 mb-8">
+        <View style={styles.imagesGrid}>
           {selectedImageObjects.map(image => (
-            <div key={image.id} className="flex items-center p-3 border rounded-lg">
-              <div className="h-16 w-16 rounded-md overflow-hidden mr-4">
-                <img 
-                  src={image.url} 
-                  alt={image.name} 
-                  className="h-full w-full object-cover" 
-                />
-              </div>
+            <View key={image.id} style={styles.imageContainer}>
+              <Image 
+                source={{ uri: image.url }} 
+                style={styles.image}
+                resizeMode="cover"
+              />
               
-              <div className="flex-1">
-                <p className="font-medium text-gray-800 truncate">{image.name}</p>
-                <div className="w-full bg-gray-200 h-1.5 rounded-full mt-2">
-                  <div 
-                    className={`h-full rounded-full ${
-                      image.uploadStatus === 'error' ? 'bg-red-500' : 'bg-app-blue'
-                    }`}
-                    style={{ 
-                      width: `${image.uploadProgress || 0}%` 
-                    }}
-                  />
-                </div>
-              </div>
+              {image.uploadProgress !== undefined && (
+                <View style={styles.progressWrapper}>
+                  <View style={styles.progressContainer}>
+                    <View 
+                      style={[
+                        styles.progressBar,
+                        { width: `${image.uploadProgress}%` }
+                      ]}
+                    />
+                  </View>
+                  
+                  <Text style={styles.progressText}>
+                    {image.uploadStatus === 'error' ? 'Error' : 
+                     image.uploadStatus === 'success' ? 'Complete' : 
+                     `${Math.round(image.uploadProgress)}%`}
+                  </Text>
+                  
+                  {image.uploadStatus === 'success' && (
+                    <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
+                  )}
+                  
+                  {image.uploadStatus === 'error' && (
+                    <Icon name="alert-circle" size={16} color="#ef4444" style={styles.statusIcon} />
+                  )}
+                </View>
+              )}
               
-              <div className="ml-4 w-8 flex-shrink-0">
-                {image.uploadStatus === 'success' && (
-                  <div className="h-6 w-6 rounded-full bg-green-500 flex items-center justify-center">
-                    <Check size={14} className="text-white" />
-                  </div>
-                )}
-                
-                {image.uploadStatus === 'error' && (
-                  <div className="h-6 w-6 rounded-full bg-red-500 flex items-center justify-center">
-                    <X size={14} className="text-white" />
-                  </div>
-                )}
-                
-                {image.uploadStatus === 'uploading' && (
-                  <RefreshCw size={18} className="text-app-blue animate-spin" />
-                )}
-              </div>
-            </div>
+              {image.description && (
+                <Text style={styles.imageDescription} numberOfLines={2}>
+                  {image.description}
+                </Text>
+              )}
+            </View>
           ))}
-        </div>
-      </div>
+        </View>
+      </ScrollView>
       
-      <div className="fixed bottom-0 left-0 right-0 bg-white p-4 shadow-lg z-10">
-        {!uploading && !uploadComplete ? (
-          <Button 
-            onClick={uploadToFirebase}
-            className="w-full bg-app-blue hover:bg-app-dark-blue"
+      <View style={styles.footer}>
+        {!uploadComplete ? (
+          <TouchableOpacity 
+            style={[styles.uploadButton, uploading && styles.uploadingButton]}
+            onPress={uploadToFirebase}
             disabled={uploading}
           >
-            <Upload size={18} className="mr-2" />
-            Start Upload
-          </Button>
-        ) : uploadComplete ? (
-          <Button 
-            onClick={handleBackToGallery}
-            className="w-full bg-green-600 hover:bg-green-700"
-          >
-            <Check size={18} className="mr-2" />
-            Back to Gallery
-          </Button>
+            {uploading ? (
+              <ActivityIndicator color="white" size="small" style={styles.buttonIcon} />
+            ) : (
+              <Icon name="upload-cloud" size={20} color="white" style={styles.buttonIcon} />
+            )}
+            <Text style={styles.uploadButtonText}>
+              {uploading ? 'Uploading...' : 'Upload to Firebase'}
+            </Text>
+          </TouchableOpacity>
         ) : (
-          <Button 
-            disabled
-            className="w-full"
+          <TouchableOpacity 
+            style={styles.doneButton}
+            onPress={navigateToGallery}
           >
-            <RefreshCw size={18} className="mr-2 animate-spin" />
-            Uploading...
-          </Button>
+            <Icon name="check" size={20} color="white" style={styles.buttonIcon} />
+            <Text style={styles.uploadButtonText}>Done</Text>
+          </TouchableOpacity>
         )}
-      </div>
-    </div>
+      </View>
+    </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 80,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#6b7280',
+    marginBottom: 24,
+  },
+  imagesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  imageContainer: {
+    width: '48%',
+    marginBottom: 16,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  image: {
+    width: '100%',
+    height: 150,
+  },
+  progressWrapper: {
+    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressContainer: {
+    flex: 1,
+    height: 4,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 2,
+    marginRight: 8,
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#3b82f6',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6b7280',
+    width: 50,
+    textAlign: 'right',
+  },
+  statusIcon: {
+    marginLeft: 4,
+  },
+  imageDescription: {
+    fontSize: 12,
+    color: '#4b5563',
+    padding: 8,
+    paddingTop: 0,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'white',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  uploadButton: {
+    backgroundColor: '#3b82f6',
+    paddingVertical: 12,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadingButton: {
+    backgroundColor: '#93c5fd',
+  },
+  doneButton: {
+    backgroundColor: '#10b981',
+    paddingVertical: 12,
+    borderRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
+  uploadButtonText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 16,
+  }
+});
 
 export default UploadImages;
